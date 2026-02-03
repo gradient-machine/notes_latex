@@ -1,0 +1,635 @@
+\documentclass{beamer}
+\usepackage{xcolor}
+\usepackage[style=authoryear,backend=biber]{biblatex} % Or style=numeric
+\addbibresource{references.bib} % Your .bib file
+\usepackage{ulem}
+%\usepackage[colorlinks=true, citecolor=blue]{hyperref}
+\newcommand{\transpose}{^{\top}} 
+
+
+\mode<presentation>
+{
+	\usetheme{Madrid}      % or try Darmstadt, Madrid, Warsaw, ...
+	\usecolortheme{rose} % or try albatross, beaver, crane, ...
+	\usefonttheme{structurebold}  % or try serif, structurebold, ...
+	\setbeamertemplate{navigation symbols}{}
+	\setbeamertemplate{caption}[numbered]
+}
+
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+
+\title[Notes on RoPE]{Notes on RoPE}
+\author{Rui}
+\institute{Independent}
+\date{27/05/2015}
+
+\begin{document}
+	
+	\begin{frame}
+		\titlepage
+	\end{frame}
+	
+	
+	\begin{frame}[plain]
+		\tableofcontents
+	\end{frame}
+	% Uncomment these lines for an automatically generated outline.
+	%\begin{frame}{Outline}
+	%  \tableofcontents
+	%\end{frame}
+	
+	\section{The General Concepts and Modeling}
+	
+	\begin{frame}{The Concept of Positional Encoding}		
+		\begin{block}{Definition}
+			\begin{itemize}
+				\item Positional encoding captures the sequential order information of words in NLP
+				\item It incorporates position information during the transformation from a token embedding to its query, key, and value for attention computation
+			\end{itemize}
+		\end{block}
+		\begin{block}{Models in NLP and their positional encoding}
+			\begin{itemize}
+				\item RNN: Computing the feature vector of an input (word) with the intermediate output of the previous one
+				\item CNN: Position-agnostic
+				\item PLM (\cite{su2023roformerenhancedtransformerrotary}) (pre-trained language model): Position-agnostic
+			\end{itemize}
+		\end{block}
+	\end{frame}
+	
+	\begin{frame}{The Modeling of Positional Encoding}
+		\begin{equation}
+			\mathbf{y}_i^t = 
+			\begin{cases} 
+				W_t \cdot \mathbf{x}_i & \text{without positional encoding} \\
+				f_t(\mathbf{x}_i, i) & \text{with positional encoding},					
+			\end{cases}
+		\end{equation}
+		where $W_t \in \mathbb{R}^{d_{model} \times d_{model}}$, $\mathbf{x}_i \in \mathbb{R}^{d_{model}}$ is the embedding of a token in a certain layer, $t\in\{Q, K, V\}$, $i\in\{1,2,...,L\}$, and $L$ is the maximum sequence length.
+	\end{frame}
+	
+	\begin{frame}{The Modeling of Positional Encoding}
+		\begin{itemize}
+			\item The computation of attention involves the inner product of query and key at all possible combinations of position pairs in a sequence, depending on a pre-defined mask.
+			\item Therefore, the position indexes of the query and the key (and value) are denoted $m$ and $n$ respectively
+			\begin{align}
+				\mathbf{q}_m & = \mathbf{y}_i^q = f_q(\mathbf{x}_m, m) \label{eqn:proj_q_with_pos_enc}\\
+				\mathbf{k}_n & = \mathbf{y}_i^k = f_k(\mathbf{x}_n, n) \label{eqn:proj_k_with_pos_enc}\\
+				\mathbf{v}_n & = \mathbf{y}_i^v = f_v(\mathbf{x}_n, n), \label{eqn:proj_v_with_pos_enc}
+			\end{align}
+			where $m, n \in \{1,2,...,L\}$.			
+		\end{itemize}
+	\end{frame}
+	
+	\section{Existing Positional Encoding}
+	\begin{frame}{Existing Positional Encoding for PLM}		
+		\begin{itemize}
+			\item Absolute position encoding
+			\begin{itemize}
+				\item Generated through a pre-defined function
+				\item Trainable encoding
+			\end{itemize}
+			\item Relative position encoding
+			\item Modeling based on Neural ODE
+			\item Modeling in complex space
+		\end{itemize}
+		\begin{block}{The common aspects of all the above methods}
+			\begin{itemize}				
+				\item Adding the position encoding to the input embedding
+				\item Not suitable for linear self-attention
+			\end{itemize}
+		\end{block}
+	\end{frame}
+	
+	\subsection{Absolute Positional Encoding}
+	\begin{frame}{Absolute Positional Encoding}		
+		\begin{itemize}
+			\item The transformation of a token embedding 			
+			\begin{equation}\label{eqn:abs_pos_enc_func}
+				f_t(\mathbf{x}_i, i) = W_t \cdot (\mathbf{x}_i + \mathbf{p}_i),
+			\end{equation}
+			where $\mathbf{p}_i \in \mathbb{R}^{d_{model} \times 1}$ is the embedding of position information.
+			\item With a pre-defined function (\cite{vaswani2023attentionneed})
+			\begin{equation}
+				\mathbf{p}_{i,k} = 
+				\begin{cases} 
+					\sin(i/10000^{2j/d_{model}}), & k = 2j \\
+					\cos(i/10000^{2j/d_{model}}), & k = 2j+1,
+				\end{cases}				
+			\end{equation}
+			where $k \in \{0,1,...,d_{model}-1\}$.
+		\end{itemize}			
+		\begin{block}{Remarks}
+			\begin{itemize}
+				\item It is the same set of vectors, i.e. $\{\mathbf{p}_i|i=1,2,...,L\}$, for Q, K, and V.
+				\item Note that between $(k=2j \text{ or } 2j+1)$ and $(k=2j \text{ or } 2j-1)$, as long as the training and inference uses the same formulation, both work. 
+				\item The former is used here to make the dimension index $k$ zero-based, consist with that in (\cite{vaswani2023attentionneed,su2023roformerenhancedtransformerrotary})				
+			\end{itemize}
+		\end{block}		
+	\end{frame}
+	
+	\subsection{Relative Positional Encoding}
+	\begin{frame}{Relative Positional Encoding}
+		\begin{itemize}
+			\item Learned positional encoding to K and V
+			\begin{equation}\label{eqn:rel_pos_enc_func}
+				f_t(\mathbf{x}_i, i) = W_t \cdot (\mathbf{x}_i + \widetilde{\mathbf{p}}_s^t),
+			\end{equation}
+			where $\tilde{\mathbf{p}}_s^t$ are learned encoding vectors, $t\in \{K, V\}$, and $s$ is the relative distance between a query vector $\mathbf{q}_m$ and a key vector $\mathbf{k}_n$, i.e.
+			\begin{equation}\label{eqn:rel_pos_enc_func_qk_dist}
+				s = \text{clip}(m-n, s_{min}, s_{max}).
+			\end{equation}				
+			\begin{block}{How $s$ is used during the computation of attention?}
+				\begin{itemize}
+					\item $\{\widetilde{\mathbf{p}}_s^Q\}$, $\{\widetilde{\mathbf{p}}_s^K\}$ are learned for all possible relative distances $\{s|s_{min} \le s \le s_{max}, s\in \mathbb{Z}_{\geq 0}\}$
+					\item When computing an attention weight between $\mathbf{q}_m$ and $\mathbf{k}_n$, which is $f_Q(\mathbf{x}_m)\transpose f_K(\mathbf{x}_n, n)$, $f_K(\mathbf{x}_n, n) = W_K \cdot (\mathbf{x}_n + \widetilde{\mathbf{p}}_{(m-n)}^K)$, $f_Q(\mathbf{x}_m) = W_Q\mathbf{x}_m$											
+				\end{itemize}					
+			\end{block}
+			\item Encoding directly in attention weight
+			\item RoPE
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Relative Positional Encoding Directly in Attention Weight}
+		\begin{itemize}
+			\item Based on (\ref{eqn:proj_q_with_pos_enc}), (\ref{eqn:proj_k_with_pos_enc}), and (\ref{eqn:abs_pos_enc_func}),
+			\begin{equation}\label{eqn:abs_pos_enc_func_in_attn_comp}
+				\begin{split}
+					\mathbf{q}_m\transpose \cdot \mathbf{k}_n = & \left(W_Q(\mathbf{x}_m + \mathbf{p}_m)\right)\transpose\left(W_K(\mathbf{x}_n + \mathbf{p}_n)\right) \\
+					= & \left(\mathbf{x}_m + \mathbf{p}_m\right)\transpose(W_Q\transpose W_K)\left(\mathbf{x}_n + \mathbf{p}_n\right) \\
+					= & \mathbf{x}_m\transpose W_Q\transpose W_K \mathbf{x}_n + \mathbf{x}_m\transpose W_Q\transpose W_K \mathbf{p}_n +  \mathbf{p}_m\transpose W_Q\transpose W_K \mathbf{x}_n + \\&\mathbf{p}_m\transpose W_Q\transpose W_K \mathbf{p}_n 			
+				\end{split}
+			\end{equation}
+			\item Replacing the absolute position encoding with relative position encoding
+			\begin{equation}\label{eqn:rel_pos_enc_func_in_attn_comp_with_uv}
+				\begin{split}				
+					\mathbf{q}_m\transpose \cdot \mathbf{k}_n = &\mathbf{x}_m\transpose W_Q\transpose W_K \mathbf{x}_n + \mathbf{x}_m\transpose W_Q\transpose \widetilde{W_K} \widetilde{\mathbf{p}}_{m-n} +  \mathbf{u}\transpose W_Q\transpose W_K \mathbf{x}_n + \\& \mathbf{v}\transpose W_Q\transpose \widetilde{W_K} \widetilde{\mathbf{p}}_{m-n}
+				\end{split}
+			\end{equation}
+		\end{itemize}
+	\end{frame}
+	
+	\section{Rotary Position Embedding (RoPE)}
+	\begin{frame}{Rotary Position Embedding (RoPE)}	
+		\begin{block}{Desirable properties of positional encoding \textcolor{red}{(need more details)}}
+			\begin{itemize}				
+				\item The sequence length flexibility
+				\item Decaying inter-token dependency with increasing relative distances
+				\item The capability of equipping the linear self-attention with relative position encoding
+			\end{itemize}
+		\end{block}		
+		\begin{block}{RoPE}
+			\begin{itemize}								
+				\item Encoding the absolute position for each token with a rotation matrix
+				\item The attention weight only relies on the relative position dependency
+				\item The encoding is applied to multiple transformer layers
+				\item Leveraging the positional information into the learning process of PLM
+				\item Distinguishing itself due to the above desirable properties
+			\end{itemize}
+		\end{block}
+	\end{frame}
+	
+	%in (\ref{eqn:proj_q_with_pos_enc}) and (\ref{eqn:proj_k_with_pos_enc})
+	\subsection{Derivation of RoPE in $\mathbb{R}^2$}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}	
+		\begin{itemize}
+			\item The goal is to find the transformation of the token embedding $f_q(\mathbf{x}_q, m)$ and $f_k(\mathbf{x}_k, n)$ for the query and key, between which \textbf{the inner product, i.e. the attention weight, depends only the input embedding $\mathbf{x}_q$ and $\mathbf{x}_k$, and the relative position $m-n$}, where $m, n \in\{1,2,...,L\} \cup \{0\}$ (refer to next page for more details), i.e. 
+			\begin{equation}\label{eqn:rope_transform_conds}
+				\mathbf{q}_m^\intercal \mathbf{k}_n = \langle f_q(\mathbf{x}_q, m), f_k(\mathbf{x}_k, n) \rangle = g(\mathbf{x}_q, \mathbf{x}_k, n-m).
+			\end{equation}	
+			%\item which can also be used to obtain the transformation without positional encoding by setting the positions $m$ and $n$ to $0$
+			\vfill
+			\begin{block}{The change from $f_t(\mathbf{x}_m, m)$ in (\ref{eqn:proj_q_with_pos_enc},\ref{eqn:proj_k_with_pos_enc}) to $f_t(\mathbf{x}_t, m)$ in (\ref{eqn:rope_transform_conds})}
+				When $m=0$, a formulation of the transformation of the token embedding without position information in any position $m\in \{1,2,...,L\}$ is needed, yet $f_t(\mathbf{x}_m, m)|_{m=0} = f_t(\mathbf{x}_0, 0)$, where $t\in\{Q,K\}$, can only represent the transformation in the position $m=0$.
+			\end{block}
+			\begin{block}{The meaning of $ = g(\mathbf{x}_m, \mathbf{x}_n, n-m)$}
+				It only specifies the conditions the inner product should meet as stated above, not a specific parametric form of it.
+			\end{block}
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}\label{page:rope_transform_cases}
+		\begin{itemize}				
+			\item $m\ne 0$, $n\ne 0$: Other than the input token embedding, the inner product depends only on the position difference
+			\begin{itemize}
+				\item $m\ne n$: Inner product between the \textbf{position encoded} transformation of $\mathbf{x}_q$ and $\mathbf{x}_k$ in \textbf{different} positions $m, n \in\{1,2,...,L\}$
+				\item $m= n$: Inner product between the \textbf{position encoded} transformation of $\mathbf{x}_q$ and $\mathbf{x}_k$ in the \textbf{same} position $m\in\{1,2,...,L\}$
+			\end{itemize}
+			\item $m= 0$, $n= 0$: Other than the input token embedding, the inner product has no other dependency, because the transformation itself is computed without position information at all
+			\begin{itemize}
+				\item Inner product between the transformation \textbf{without position information} of $\mathbf{x}_q$ and $\mathbf{x}_k$ in any position $m, n \in\{1,2,...,L\}$. $m=n=0$ does not refer to the position of the $0-th$ token as the position starts from $1$. It simply indicates that the transformation does not contain any information on position.
+			\end{itemize}
+			\item $(m\ne 0, n= 0)$ and $(m= 0, n\ne 0)$: Invalid combinations because there is no attention weight by the inner product between a position encoded transformation and one without position information.
+		\end{itemize}
+		%\vfill		
+		%\begin{block}{A summry on the condition expressed in (\ref{eqn:rope_transform_conds})}		
+		%\end{block}					
+	\end{frame}
+	% \vskip 1cm			
+	% \begin{frame}{Graphical determination of the existence of a fixed point for the function $g(x)= \frac{x^2-3}{2}$}
+		
+		% \includegraphics[width=355px, height= 200px]{Figure2.jpg}
+		% \end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}	
+		\begin{itemize}
+			\item For the first case in (Pg. \ref{page:rope_transform_cases}), the \textbf{position encoded} transformation of the token embedding for the query in position $m$ and that for the key in position $n$, represented by $f_q(\mathbf{x}_q, m)$ and $f_k(\mathbf{x}_k, n)$ in  (\ref{eqn:rope_transform_conds}), where $m,n \in \{1,2,...,L\}$, can be formulated using complex form as follows
+			\begin{align} 
+				\mathbf{q}_m &= \|\mathbf{q}_m\|e^{i\theta_{q_m}} = f_q(\mathbf{x}_q, m) = R_q(\mathbf{x}_q, m)e^{i\Theta_q(\mathbf{x}_q, m)} \label{eqn:rope_transform_complex_q} \\ 
+				\mathbf{k}_n &= \|\mathbf{k}_n\|e^{i\theta_{k_n}} = f_k(\mathbf{x}_k, n) = R_k(\mathbf{x}_k, n)e^{i\Theta_k(\mathbf{x}_k, n)} \label{eqn:rope_transform_complex_k}
+			\end{align}
+			\item For the second case in (Pg. \ref{page:rope_transform_cases}), the transformation \textbf{without position information} for the query and key, of the token embedding in any position $m,n\in\{1,2,...,L\}$, referred to as the initial condition in (\cite{su2023roformerenhancedtransformerrotary}), are expressed as follows
+			\begin{align} 
+				\mathbf{q} &= \|\mathbf{q}\|e^{i\theta_q} = f_q(\mathbf{x}_q, 0) = R_q(\mathbf{x}_q, 0)e^{i\Theta_q(\mathbf{x}_q, 0)} \label{eqn:rope_transform_wo_posenc_complex_p} \\ 
+				\mathbf{k} &= \|\mathbf{k}\|e^{i\theta_k} = f_k(\mathbf{x}_k, 0) = R_k(\mathbf{x}_k, 0)e^{i\Theta_k(\mathbf{x}_k, 0)} \label{eqn:rope_transform_wo_posenc_complex_k}
+			\end{align}						
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}	
+		\begin{block}{Regarding the change of notation on token embedding}
+			\begin{itemize}
+				\item $f_q(\mathbf{x}_m, m) \text{ and } f_k(\mathbf{x}_n, n)$ have been changed to $f_q(\mathbf{x}_q, m) \text{ and } f_k(\mathbf{x}_k, n)$. Although the purpose of this change in (\cite{su2023roformerenhancedtransformerrotary}) is unclear, its change here indicates that, with or without position encoding, the same function is used for the transformation of token embedding. 
+				\item For the transformation without positional encoding, $m$ and $n$ are set to $0$, out of the range of the position in a sequence. If formulated as $f_q(\mathbf{x}_m, m)$, it would become $f_q(\mathbf{x}_0, 0)$, which can not express the transformation at any position $m\in\{1,2,...,L\}$. This applies to $f_k(\mathbf{x}_k, n)$ as well.				
+			\end{itemize}
+		\end{block}
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}	
+		\begin{itemize}		
+			\item Substituting (\ref{eqn:rope_transform_complex_q},\ref{eqn:rope_transform_complex_k}) into the LHS of  (\ref{eqn:rope_transform_conds}), which merely changes the formulation of inner product in $\mathbb{R}^2$ to that in $\mathbb{C}$,
+			\begin{equation}\label{eqn:rope_attnw_qk}
+				\begin{split}
+					\mathbf{q}_m\transpose \mathbf{k}_n &= Re\left\{R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, n)e^{i\left[\Theta_k(\mathbf{x}_k, n) -\Theta_q(\mathbf{x}_q, m)\right]}\right\} \\
+					&= R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, n)\cos\left(\Theta_k(\mathbf{x}_k, n) -\Theta_q(\mathbf{x}_q, m)\right)
+				\end{split}
+			\end{equation}
+			\item $g(\mathbf{x}_m, \mathbf{x}_n, n-m)$ is the real part of a complexified vector originally in $\mathbb{R}^2$, because it is used to represent the inner product of two complexified vectors originally in $\mathbb{R}^2$
+			\begin{equation}\label{eqn:rope_attnw_goal}
+				\begin{split}
+					g(\mathbf{x}_m, \mathbf{x}_n, n-m) &= Re\left\{R_g(\mathbf{x}_q, \mathbf{x}_k, m-n)e^{i\left[\Theta_g(\mathbf{x}_k, \mathbf{x}_q, m-n)\right]}\right\} \\
+					&= R_g(\mathbf{x}_q, \mathbf{x}_k, m-n)\cos\left(\Theta_g(\mathbf{x}_k, \mathbf{x}_q, m-n)\right)
+				\end{split}
+			\end{equation}
+			\item Based on (\ref{eqn:rope_attnw_qk}) and (\ref{eqn:rope_attnw_goal}), the \textbf{condition} in (\ref{eqn:rope_transform_conds}) is equivalent to 
+			\begin{align}				
+				R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, n) &= R_g(\mathbf{x}_q, \mathbf{x}_k, m-n) \label{eqn:rope_transform_conds_amplitude}\\
+				\Theta_k(\mathbf{x}_k, n) -\Theta_q(\mathbf{x}_q, m) &= \Theta_g(\mathbf{x}_k, \mathbf{x}_q, m-n) \label{eqn:rope_transform_conds_angular}				
+			\end{align}
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}
+		\begin{itemize}
+			\item It is worth nothing that the $= g(\mathbf{x}_q, \mathbf{x}_k, m-n)$ in (\ref{eqn:rope_transform_conds}) and $= R_g(\mathbf{x}_q, \mathbf{x}_k, m-n)$ in (\ref{eqn:rope_transform_conds_amplitude}) declare the same kind of condition, which is that the LHS's of both depend only on three factors, i.e. $\mathbf{x}_q$, $\mathbf{x}_k$, $m-n$, rather than being equal to any specific parametric form represented as their RHS's.
+			\item This, however, is still effective in guiding the search for the parametric forms of $f_q(\mathbf{x}_q, m)$ and $f_k(\mathbf{x}_k, n)$, even thought they may not be the unique or optimal form for query and key, respectively, as will be explained in what follows.
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}
+		\begin{itemize}		
+			\item So far, the \textbf{goal} of the derivation is to find the parametric forms of $R_q(\cdot), R_k(\cdot), \Theta_q(\cdot), \Theta_k(\cdot)$, which satisfy (\ref{eqn:rope_transform_conds_amplitude}) and (\ref{eqn:rope_transform_conds_angular})
+			\item First, the special cases of $n=m$, where $m \in \{1,2,...,L\} \cup \{0\}$, are considered to find out if it is possible to construct the parametric forms of $R_q(\cdot)$ and $R_k(\cdot)$ for at least these special cases. 
+			\item If achieved, the forms will be verified to determine whether they are useful for $n\neq m$. If also achieved, the problems associated with the $R_q(\cdot), R_k(\cdot)$ are solved.
+			\item Then, the same method is applied to $\Theta_q(\cdot), \Theta_k(\cdot)$.
+		\end{itemize}
+		\begin{block}{Regarding $m\in\{1,2,...,L\} \cup \{0\}$}
+			\begin{itemize}
+				\item When $m\in\{1,2,...,L\}$, $f_t(\mathbf{x}_t, m)$, where $t\in\{Q, K\}$, is the position encoded transformation of a token embedding. Please refer to equation (20) in (\cite{su2023roformerenhancedtransformerrotary}) for this interpretation.
+				\item When $m=0$, $f_t(\mathbf{x}_t, 0)$ is the transformation of a token embedding without position information at any position. Please refer to equation (22) in (\cite{su2023roformerenhancedtransformerrotary}) for this interpretation.
+			\end{itemize}
+		\end{block}
+	\end{frame}
+	% 			which is just a even more special case among those covered by $n=m$ in (\ref{eqn:rope_attnw_amplitude_same_pos}).		
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}		
+		\begin{itemize}
+			\item According to (Pg. \ref{page:rope_transform_cases}), the special cases of $n=m$, where $m \in \{1,2,...,L\} \cup \{0\}$, can be further categorized into two subsets
+			\item \textbf{The subset of $n=m\neq 0$:} The cases in which the attention weight is computed between the position encoded embedding of $\mathbf{x}_q$ and $\mathbf{x}_k$ in the same position. To satisfy (\ref{eqn:rope_transform_conds_amplitude}), 
+			\begin{equation} \label{eqn:rope_attnw_amplitude_same_pos}
+				R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, m) = R_g(\mathbf{x}_q, \mathbf{x}_k, 0).
+			\end{equation}							
+			\item \textbf{The subset of $n=m=0$:} The cases in which the attention weight is computed between the transformation without position information of $\mathbf{x}_q$ and $\mathbf{x}_k$ in any position. To satisfy (\ref{eqn:rope_transform_conds_amplitude}), 
+			\begin{equation} \label{eqn:rope_attnw_amplitude_any_pos_but_no_pos}
+				R_q(\mathbf{x}_q, 0)R_k(\mathbf{x}_k, 0) = R_g(\mathbf{x}_q, \mathbf{x}_k, 0),
+			\end{equation}
+		\end{itemize}
+	\end{frame}	
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}
+		\begin{block}{Further interpretation of (\ref{eqn:rope_attnw_amplitude_same_pos})}
+			\begin{itemize}		
+				\item $\mathbf{x}_q$ and $\mathbf{x}_k$ represent the token embedding at any position. For the same position, $\mathbf{x}_q=\mathbf{x}_k$.
+				\item The $0$ on the RHS refers to the same position, not the transformation of a token embedding without position information.				
+				\item It should be read as "the product $R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, m)$ of the amplitude parts of $\mathbf{q}_m$, i.e. $f_q(\mathbf{x}_q, m)$, and $\mathbf{k}_m$, i.e. $f_k(\mathbf{x}_k, m)$, at the same position $m$ should depends only on the difference between the position, which is $0$." 
+				\item In this equation, no transformation without position information is involved yet. In (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}), it is. %Together with (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}), we are just trying to find $R_q(\cdot)$ and $R_k(\cdot)$ such that $R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, m)$ = $R_q(\mathbf{x}_q, 0)R_k(\mathbf{x}_k, 0)$, i.e. the inner product of two position encoded transformation in the same position is the same as that of the two transformation without position information.
+			\end{itemize}
+		\end{block}			
+	\end{frame}
+	
+	\begin{frame}{Drivation of RoPE in $\mathbb{R}^2$}
+		\begin{itemize}
+			\item (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}) can be provided with the $\mathbf{x}_q, \mathbf{x}_k$ in their own respective subsets. In other words, the $\mathbf{x}_q, \mathbf{x}_k$ given as the input of (\ref{eqn:rope_attnw_amplitude_same_pos}) and the $\mathbf{x}_q, \mathbf{x}_k$ given as the input of (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}) can be different. In this sense, they are not related. 
+			\item But if $\mathbf{x}_q, \mathbf{x}_k$ in a particular position $m$, which are the same token embedding at $m$, are given as input to the LHS's of both (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}), \sout{their LHS's will be equal because their RHS's are of the same parametric form, although unknown yet, which depends on the same set of three inputs.} (wrong!, it should be) their LHS's will depend on the same three factors, which are $\mathbf{x}_q$, $\mathbf{k}_k$, and $0$. In this sense, (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}) are related.
+			\begin{itemize}
+				\item The LSH's of (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}), however, are related ONLY because they depend on the same set of factors, NOT because they depend on them in the same way, i.e. not because they have the same parametric form.
+			\end{itemize}			
+		\end{itemize}		
+	\end{frame}
+	
+	\begin{frame}{Drivation of RoPE in $\mathbb{R}^2$}
+		\begin{itemize}		
+			\item Up to this step, the \textbf{goal} expressed in (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}) is to construct the parametric forms of $R_q(\mathbf{x}_q, m)$ and $R_k(\mathbf{x}_k, n)$ such that, given $\mathbf{x}_q$ and $\mathbf{x}_k$ in the same position $m \in\{1,2,...,L\}$, their inner product based on their position encoded transformation \sout{is the same} (wrong! it should be) should depend on the same set of three factors, i.e. $\mathbf{x}_q$, $\mathbf{k}_k$, and $0$, as the inner product based on the transformation without position information does. That is, given any $m \in \{1,2,...,L\}\}$, the two LHS's \sout{are equal} (wrong, it should be) have the same dependency in terms of the input. 
+			\item Nonetheless, it is still acceptable to construct $R_t(\mathbf{x}_t, m), t\in \{Q,K\}$ such that the LHS's of (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}) have the same parametric form for an $m\in\{1,2,...,L\}$, as this will still satisfy the condition of sharing the common dependency. When $m$ is changed, both LHS's will be changed to another value, but still the equal.
+		\end{itemize}		
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}
+		\begin{itemize}
+			\item As stated before based on (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_any_pos_but_no_pos}), the goal of constructing $R_q(\mathbf{x}_q, m)$ and $R_k(\mathbf{x}_k, n)$ in the current immediate step is to find out certain parametric forms of them, which satisfy
+			\begin{equation}\label{eqn:rope_cond_amplitude_withpos_withoutpos_equal}
+				R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, m) = R_q(\mathbf{x}_q, 0)R_k(\mathbf{x}_k, 0),
+			\end{equation}
+			i.e. \textbf{using a more specific condition that is the equal parametric form as a substitute for the less specific condition that is the shared common dependency in terms of the input.}			
+		\end{itemize}		
+	\end{frame}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}
+		\begin{itemize}			
+			\item (\ref{eqn:rope_cond_amplitude_withpos_withoutpos_equal}) does not mean that the parametric forms on both sides are found and equal. \textbf{The way to understand it is that, whatever parametric form the RHS takes, the form of the LHS should be the same. In other words, all the derivation since (\ref{eqn:rope_transform_conds}) just reveals more self-consistency at a finer granularity, i.e. from the $\langle f_q(\mathbf{x}_q, m), f_q(\mathbf{x}_k, n)\rangle$ to $\langle R_q(\mathbf{x}_q, m), R_k(\mathbf{x}_k, n)\rangle$, and from $\forall m,n\in\{1,2,...,L\} \cup \{0\}$ to $m=n=0$ and $m=n\ne 0$, which guides the search for the ultimate $f_t(\mathbf{x}_t, m)$. In this particular intermediate step, it leads the search towards the form of $R_t(\mathbf{x}_t, m)$ first, $t\in\{Q,K\}$.}
+			\item In addition, (\ref{eqn:rope_cond_amplitude_withpos_withoutpos_equal}) only declares that the product on the LHS is equal to that on the RHS, not that some term on the LHS is equal to any term on the RHS.
+			\item Although there may be multiple parametric forms of $R_t(\mathbf{x}_t, m), t\in\{Q,K\}$ satisfying (\ref{eqn:rope_cond_amplitude_withpos_withoutpos_equal}), of which the structure, if known, can be used to guide the search for the optimal form of each, it is unnecessary to find all of them.			
+		\end{itemize}		
+	\end{frame}
+	
+	%	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}
+		%		\begin{itemize}
+			%			\item The order in which the attempt to finding the parametric forms of $R_q(\cdot), R_k(\cdot)$ is carried out is as follows, based on (\ref{eqn:rope_attnw_amplitude_same_pos}) and (\ref{eqn:rope_attnw_amplitude_same_pos_0}),
+			%			\item $n=m=0$ includes the attention weights, which are computed between the query and key vectors transformed from the token embedding at any position $m$ and $n$ without position information.
+			%		\end{itemize}		
+		%	\end{frame}
+	
+	% \item It should be read as $R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, m)$ satisfies the condition that, for itself, it depends on $0$, which is a special case of position difference.
+	
+	%	\subsection{Banach Fixed Point Theorem}
+	
+	\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}		
+		%		\begin{theorem}[Banach Fixed Point Theorem]
+			\begin{itemize}
+				\item Therefore, \textbf{an acceptable construction based on an even further specific condition is,}
+				\begin{equation}
+					R_t(\mathbf{x}_t, m) = R_t(\mathbf{x}_t, 0),
+				\end{equation}
+				for $t\in\{Q,K\}$. Based on (\ref{eqn:rope_transform_wo_posenc_complex_p}) and (\ref{eqn:rope_transform_wo_posenc_complex_k}),
+				\begin{align}
+					R_q(\mathbf{x}_q, m) = & R_q(\mathbf{x}_q, 0) = \|\mathbf{q}\| \label{eqn:rope_transform_amplitude_param_form_q}\\
+					R_k(\mathbf{x}_k, n) = & R_k(\mathbf{x}_k, 0) = \|\mathbf{k}\| \label{eqn:rope_transform_amplitude_param_form_k}
+				\end{align}
+				\item (\ref{eqn:rope_transform_amplitude_param_form_q}, \ref{eqn:rope_transform_amplitude_param_form_k}) directly result in 
+				\begin{equation}
+					R_q(\mathbf{x}_q, m)R_k(\mathbf{x}_k, n) = \|\mathbf{q}\|\cdot\|\mathbf{k}\|,
+				\end{equation}
+				satisfying the condition in (\ref{eqn:rope_transform_conds_amplitude}).
+				\item \textbf{This is exactly the construction formed in (Eq. 26a) in (\cite{su2023roformerenhancedtransformerrotary})}. 
+			\end{itemize}  		
+			%		\vskip 1cm
+		\end{frame}	
+		
+		\begin{frame}{Derivation of RoPE in $\mathbb{R}^2$}		
+			To be continued ...
+		\end{frame}
+		
+		%	\begin{frame}{Banach Fixed Point Theorem}
+			%		
+			%		\begin{block}{Proof}
+				%			
+				%			For $n > m$ , we have
+				%			\begin{align*}
+					%				\mid x_n-x_m\mid&=\mid x_n-x_{n-1}+x_{n-1}-x_{n-2}+...+x_{m+1}-x_{m}\mid\\
+					%				&\le\mid x_n-x_{n-1}\mid + \mid x_{n-1}-x_{n-2}\mid+...+\mid x_{m+1}-x_{m}\mid\\
+					%				&by  *\\
+					%				&\le(\lambda^{n-1}+\lambda^{n-2}+...+\lambda^{m})\mid x_1-x_0\mid\\
+					%				&=\lambda^{m}(\lambda^{n-m-1}+\lambda^{n-m-2}+...+1)\mid x_1-x_0\mid\\
+					%				&=\lambda^{m}\frac{1-\lambda^{n-m}}{1-\lambda}\mid x_1-x_0\mid\le \frac{\lambda^m}{1-\lambda}\mid x_1-x_0\mid
+					%			\end{align*}
+				%			
+				%			so that ${x_n}$ is Cauchy sequence in U.
+				%			\\Since U is complete, ${x_n}$ converges to a point p $\in$ U
+				%			$$*\color{red}\mid x_k-x_{k-1}\mid=\mid g(x_{k-1})-g(x_{k-2})\mid\le\lambda\mid x_{k-1}-x_{k-2}\mid\le..\le\lambda^{k-1}\mid x_1-x_0\mid\color{black}$$
+				%			
+				%		\end{block}
+			%		
+			%		\vskip 1cm
+			%		
+			%	\end{frame}
+		%	
+		%	
+		%	\begin{frame}
+			%		\begin{proof}[Continue]
+				%			\begin{itemize}
+					%				
+					%				\item[]<1->Now,since g being contraction is continuous, we have 
+					%				$$p=\lim_{n\to\infty}x_{n}=\lim_{n\to\infty}g(x_{n-1})=g(lim_{n\to\infty}x_{n-1})=g(p)$$
+					%				\\so that p is fixed point of g.
+					%				\\By the lemma p is the unique fixed point of g.
+					%				\item[]<2->Since $$\mid x_n-x_m\mid\le \frac{\lambda^m}{1-\lambda}\mid x_1-x_0\mid,$$
+					%				\\letting n$\rightarrow\infty$
+					%				\item[]<3->we get $$\mid p-x_m\mid\le \frac{\lambda^m}{1-\lambda}\mid x_1-x_0\mid$$ 
+					%				\\for $y_0=x_{n-1},$ $y_1= x_n$
+					%				$$\mid y_1- p\mid \le \frac{\lambda}{1-\lambda}\mid y_1-y_0\mid$$
+					%			\end{itemize}
+				%		\end{proof}
+			%		\vskip 1cm
+			%		
+			%	\end{frame}
+		%	
+		%	\subsection{The Fixed Point Algorithm}
+		%	
+		%	\begin{frame}{The Fixed Point Algorithm}
+			%		
+			%		
+			%		
+			%		\begin{block}{The Fixed Point Algorithm}<1->
+				%			
+				%			
+				%			If g has a fixed point p, then the fixed point algorithm generates a sequence $\left\{x_n\right\} $ defined as
+				%			\\$x_0$: arbitrary but fixed,
+				%			\\$x_n=g(x_{n-1})$, n=1,2,3,... to approximate p.
+				%		\end{block}
+			%		
+			%	\end{frame}
+		%	
+		%	\subsection{Fixed Point The Case Where Multiple Derivatives Are Zero at The Fixed Point}
+		%	\begin{frame}{Fixed Point The Case Where Multiple Derivatives Are Zero at The Fixed Point}
+			%		\begin{block}{Theorem}
+				%			\begin{itemize}
+					%				
+					%				\item[]<1->Let g be a continuous function on the closed internal $[a,b]$ with $\alpha>1$ continuous derivatives on the internal (a,b). 
+					%				\\Further, Let p $\in $(a,b) be a fixed point of g. 
+					%				\item[]<2->if $$g'(p)=g''(p)=...=g^{(\alpha-1)}(p)=0$$ but $g^{(\alpha)}(p)\neq 0$, 
+					%				
+					%				\item[]<3->then there exist a $\delta>0$ such that for any $p_0\in[p-\delta,p+\delta]$, the sequence $p_n=g(p_{n-1})$ converges to the fixed point p of order $\alpha$ with asymtotic error constant $$\lim_{n\to\infty}\frac{\mid e_{n+1}\mid}{\mid e_n\mid^\alpha}=\frac{\mid g^{(\alpha)}(p)\mid}{\alpha!}$$.
+					%				
+					%			\end{itemize}
+				%		\end{block}
+			%	\end{frame}
+		%	
+		%	
+		%	\begin{frame}
+			%		
+			%		\begin{block}{Proof}
+				%			\begin{itemize}
+					%				
+					%				
+					%				\item[]<1->Let$'$s start by establishing the existence of $\delta>0$ such that for any $p_0\in [p-\delta,p+\delta]$, the sequence $p_n=g(p_{n-1})$ converges to the fixed point p.
+					%				
+					%				\item[]<2->Let $\lambda<1$. Since $g'(p)=0$ and $g'$ is continuous, it follows that there exists a $\delta>0$ such that$\mid g'(x)\mid\le \lambda<1$ for all $x\in I \equiv[p-\delta,p+\delta]$ From this, it follows that g:I$\rightarrow$I; for if x$\in$ I then,
+					%				\item[]<3->
+					%				\begin{align*}
+						%					\mid g(x)-p\mid&=\mid g(x)-g(p)\mid\\
+						%					&=\mid g'(\xi)\mid\mid x-p\mid\\
+						%					&\le \lambda\mid x-p\mid<\mid x-p\mid\\
+						%					&\le\delta
+						%				\end{align*}
+					%				\item[]<4->Therefore by the a fixed point theorem established earlier, the sequence $p_n=g(p_{n-1})$ converges to the fixed point p for any $p_0\in [p-\delta,p+\delta]$.
+					%				
+					%			\end{itemize}
+				%		\end{block}
+			%		
+			%		\vskip 1cm
+			%		
+			%	\end{frame}
+		%	
+		%	
+		%	
+		%	\begin{frame}
+			%		
+			%		\begin{block}{Continue}
+				%			\begin{itemize}
+					%				
+					%				
+					%				\item[]<1->To establish the order of convergence, let x$\in$ I and expand the iteration function g into a Taylor series about x=p:
+					%				$$g(x)=g(p)+g'(p)(x-p)+...+\frac{g^{\alpha-1}(p)}{(\alpha-1)!}(x-p)^{\alpha-1}+\frac{g^{\alpha}(\xi)}{(\alpha)!}(x-p)^{\alpha}$$ 
+					%				\\where $\xi$ is between x and p. 
+					%				\item[]<2->Using the hypotheses regarding the value of $g^{(k)}(p)$ for $1\le k\le \alpha-1$ and letting $x=p_n$, the Taylor series expansion simplifies to $$p_n+1-p=\frac{g^(\alpha)(\xi)}{\alpha!}(p_n-p)^\alpha$$
+					%				\\where $\xi$ is now between $p_n$ and p.
+					%				
+					%			\end{itemize}
+				%		\end{block}
+			%		
+			%		\vskip 1cm
+			%		
+			%	\end{frame}
+		%	
+		%	
+		%	\begin{frame}
+			%		
+			%		\begin{proof}[Continue]
+				%			\begin{itemize}
+					%				\item[]<1->The definitions of fixed point iteration scheme and of a fixed point have been used to replace $g(p_n)$ with $p_{n+1}$ and g(p) with p.
+					%				
+					%				\item[]<2->Finally, let $n\rightarrow\infty$.Then $p_n\rightarrow p$, forcing $\xi\rightarrow$ p also.
+					%				Hence $$\lim_{n\to\infty}\frac{\mid e_{n+1}\mid}{\mid e_n\mid^\alpha}=\frac{\mid g^{(\alpha)}(p)\mid}{\alpha!}$$
+					%				\\or $p_n\rightarrow$ p of order $\alpha$.
+					%				
+					%			\end{itemize}
+				%		\end{proof}
+			%		
+			%		
+			%	\end{frame}
+		%	\section{Steffensen's Acceleration Method}
+		%	
+		%	\subsection{Aitken's $\Delta^2$ Method}
+		%	\begin{frame}
+			%		
+			%		\begin{theorem}[Aitken's $\Delta^2$ method]
+				%			\begin{itemize}
+					%				\item[] <1-> Suppose that
+					%				\begin{itemize}
+						%					\item $\left\{x_{n}\right\}$ is a sequence with $x_{n}\neq$ p for all n $\in \mathbb{N}$ 
+						%					\item there is a constant c $\in \Re\setminus \left\{ \mp 1 \right\}$ and a sequece $\left\{ \delta_{n} \right\}$
+						%					
+						%					such that 
+						%					\begin{itemize}
+							%						\item $\lim_{n\rightarrow\infty}\delta_{n}=0$
+							%						\item $x_{n+1}-p=(c+\delta_{n})(x_{n}-p)$ for all n $\in  \mathbb{N}$
+							%					\end{itemize}
+						%				\end{itemize}
+					%				\item[] <2->Then
+					%				
+					%				\begin{itemize}
+						%					\item $\left\{x_{n}\right\}$ converges to p iff $\left|c\right|<1$
+						%					\item if $\left|c\right|<1$ , then 
+						%					\[ 
+						%					y_{n}=\frac{x_{n+2}x_{n}-x_{n+1}^2}{x_{n+2} - 2x_{n+1}+x_{n}}= x_n-\frac{(x_{n+1}-x_n)^2}{x_{n+2}-2x_{n+1}+x_n}
+						%					\] 
+						%				\end{itemize}
+					%				\      is well-defined for all sufficiently large n.
+					%				\item[]<3-> Moreover $\left\{y_{n}\right\}$ converges to p faster than $\left\{x_{n}\right\}$ in the sense that
+					%				\[ 
+					%				\lim_{n\rightarrow\infty} \frac{y_{n}-p}{x_{n}-p}=0
+					%				\]
+					%			\end{itemize}
+				%			
+				%		\end{theorem}
+			%		
+			%		\vskip 1cm
+			%		
+			%	\end{frame}
+		%	
+		%	\begin{frame}
+			%		\begin{proof}
+				%			\begin{itemize}
+					%				\item[]<1-> Let $e_{n} = x_{n}-p$ 
+					%				\item[]<2-> $y_{n}-p=\frac{x_{n+2}x_{n}-x_{n+1}^2}{x_{n+2} - 2x_{n+1}+x_{n}}-p$
+					%				\item[]<3-> $y_{n}-p$=$\frac{(e_{n+2}+p)(e_{n}+p)-(e_{n+1}+p)^2}{(e_{n+2}+p)-2(e_{n+1}+p)+(e_{n}+p)}$
+					%				\item[]<4-> $y_{n}-p$=$\frac{e_{n+2}e_{n}-e_{n}^2}{e_{n+2}-2e_{n+1}+e_{n}}$
+					%				\item[]<5-> since we have
+					%				\item[]<5-> $x_{n+1}-p= (c+\delta_{n})(x_{n}-p)$ 
+					%				\ and $e_{n+1}=(c+\delta_{n}e_{n})$
+					%				\item[]<6-> $y_{n}-p$=$\frac{(c+\delta_{n+1})(c+\delta_{n})e_{n}e_{n}-(c+\delta_{n})^2e_{n}^2}{(c+\delta_{n+1})(c+\delta_{n})e_{n}-2(c+\delta_{n})e_{n}+e_{n}}$
+					%				\item[]<7-> $y_{n}-p$=$\frac{(c+\delta_{n+1})(c+\delta_{n})-(c+\delta_{n})^2}{(c+\delta_{n+1})(c+\delta_{n})-2(c+\delta_{n})+1}$ $(x_{n}-p)$
+					%				\item[]<8-> $y_{n}-p$=$\frac{(c+\delta_{n})(\delta_{n+1}-\delta_{n})}{(c-1)^+c(\delta_{n+1}+\delta_{n})+\delta_{n}(\delta_{n+1}-2)}$
+					%				\item[]<9-> Therefore $\lim_{n\rightarrow\infty} \frac{y_{n}-p}{x_{n}-p}=0$
+					%			\end{itemize}
+				%		\end{proof}
+			%		
+			%	\end{frame}
+		%	\subsection{Steffensen's Acceleration Method}
+		%	\begin{frame}
+			%		\begin{block}{Steffensen's Acceleration Method}
+				%			\begin{itemize}
+					%				
+					%				
+					%				
+					%				\item[]<1->Steffensen’s Method is a combination of fixed-point iteration and the Aitken’s $\Delta^2$ method: 
+					%				
+					%				\item[]<2->Suppose we have a fixed point iteration: $$x_0,x_1=g(x_0),x_2=g(x_1),...$$
+					%				\item[]<3->Once we have $x_0, x_1,$ and $x_2,$ we can compute $$ y_0=x_0-\frac{(x_1-x_0)^2}{x_2-2x_1+x_0}$$ 
+					%				At this point we "restart" the fixed point iteration with $x_0=y_0$
+					%				\item[]<4->e.g.\color{brown} $$x_3=y_0, x_4=g(x_3), x_5=g(x_4),$$\color{black}
+					%				and compute \color{brown} $$y_3=x_3-\frac{(x_4-x_3)^2}{x_5-2x_4+x_3}$$ \color{black}
+					%				
+					%			\end{itemize}
+				%			
+				%		\end{block}
+			%	\end{frame}
+		%	\section{Comparison With Fixed point iteration and Steffensen's Acceleration Method}
+		%	\begin{frame}{Comparison with Fixed Point Iteration and Steffensen's Acceleration Method}
+			%		\begin{block}{EXAMPLE}
+				%			\begin{itemize}
+					%				
+					%				
+					%				\item[]<1-> Use the Fixed Point iteration method to find a solution to $f(x) = x^2-2x-3$ using $x_0=0$, tolerance =$10^{-1}$ and compare the approximations with those given by Steffensen's Acceleration method with $x_0=0$, tolerance = $10^{-2}$.
+					%				\item<2-> We can see that my MATLAB code while  Fixed Point iteration method reaches the root by 788 iteration, Steffensen's Acceleration method reaches the root by only 3 iterations. 
+					%			\end{itemize}
+				%			
+				%		\end{block}
+			%		
+			%	\end{frame}
+		
+		\begin{frame}[allowframebreaks]{References}
+			\printbibliography
+		\end{frame}
+	\end{document}
